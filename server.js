@@ -40,10 +40,14 @@ app.get("/api/:subject/index", async (req, res) => {
   try {
     const subject = req.params.subject;
 
-    const config = {
-      quimica: "QUIM/indexquim.json",
-      matii: "MATII/indexmatii.json"
-    };
+const config = {
+  quimica: "QUIM/indexquim.json",
+  matii: "MATII/indexmatii.json",
+  fisica: "FIS/indexfis.json",
+  macsii: "MACSII/indexmacsii.json",
+  tinii: "TINII/indextinii.json",
+  dtecii: "DTECII/indexdtecii.json"
+};
 
     const path = config[subject];
     if (!path) return res.status(404).json({ error: "Materia no válida" });
@@ -64,10 +68,14 @@ app.get("/api/:subject/file", async (req, res) => {
       return res.status(400).json({ error: "Falta name" });
     }
 
-    const folders = {
-      quimica: "QUIM",
-      matii: "MATII"
-    };
+const folders = {
+  quimica: "QUIM",
+  matii: "MATII",
+  fisica: "FIS",
+  macsii: "MACSII",
+  tinii: "TINII",
+  dtecii: "DTECII"
+};
 
     const folder = folders[subject];
     if (!folder) return res.status(404).json({ error: "Materia no válida" });
