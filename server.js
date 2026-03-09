@@ -116,3 +116,29 @@ app.get("/api/:subject/file", checkUserPlan, async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Servidor operativo en puerto ${PORT}`));
+
+// Ruta para que el administrador cambie planes
+app.post("/api/admin/set-plan", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).send("No autorizado");
+
+  const token = authHeader.split('Bearer ')[1];
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    
+    // SEGURIDAD: Solo tu email puede usar esta ruta
+    if (decodedToken.email !== 'TU_EMAIL_DE_ADMIN@gmail.com') {
+      return res.status(403).send("No tienes permisos de administrador");
+    }
+
+    const { email, plan } = req.body;
+    const user = await admin.auth().getUserByEmail(email);
+    
+    // Asignamos el plan como un Custom Claim
+    await admin.auth().setCustomUserClaims(user.uid, { plan: plan });
+    
+    res.json({ message: `Plan ${plan} asignado a ${email}` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
