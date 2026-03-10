@@ -22,18 +22,18 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   });
 }
 
-// Middleware corregido para identificar plan y email
+// Middleware: Extrae Plan y Email del Token
 async function checkUserPlan(req, res, next) {
   const authHeader = req.headers.authorization;
   req.userPlan = 'basico';
-  req.userEmail = null; // Inicializamos el email
+  req.userEmail = null;
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const idToken = authHeader.split('Bearer ')[1];
     try {
       const decodedToken = await admin.auth().verifyIdToken(idToken);
       req.userPlan = decodedToken.plan || 'estudiante';
-      req.userEmail = decodedToken.email; // Guardamos el email para validaciones
+      req.userEmail = decodedToken.email;
     } catch (error) {
       console.error("Error verificando token:", error);
     }
@@ -82,7 +82,7 @@ app.get("/api/:subject/index", checkUserPlan, async (req, res) => {
   }
 });
 
-// 2. Obtener Preguntas (Lógica de soluciones corregida)
+// 2. Obtener Preguntas (Con permisos de Administrador y Pro)
 app.get("/api/:subject/file", checkUserPlan, async (req, res) => {
   try {
     const { subject } = req.params;
@@ -93,19 +93,20 @@ app.get("/api/:subject/file", checkUserPlan, async (req, res) => {
     const folders = { quimica: "QUIM", matii: "MATII", fisica: "FIS", macsii: "MACSII", tinii: "TINII", dtecii: "DTECII" };
     let questions = await fetchGithubJson(`${folders[subject]}/${file}`);
 
+    // Definimos quién es "VIP" (Tú o planes de pago)
+    const esVIP = (email === 'profeabatista@gmail.com' || plan === 'pro' || plan === 'docente');
+
     // --- FILTRADO POR AÑOS ---
-    if (plan === 'basico' || plan === 'estudiante') {
+    // Si NO es VIP, solo ve de 2023 en adelante
+    if (!esVIP) {
       questions = questions.filter(q => q.exam_year >= 2023);
     }
 
-    // --- LÓGICA DE SOLUCIONES (EL FILTRO CORRECTO) ---
-    // Solo permitimos ver soluciones si:
-    // Es el admin (tú) O tiene plan 'pro' O tiene plan 'docente'
-    const tienePermiso = (email === 'profeabatista@gmail.com' || plan === 'pro' || plan === 'docente');
-
-    if (!tienePermiso) {
+    // --- FILTRADO DE SOLUCIONES ---
+    // Si NO es VIP, borramos el campo solution
+    if (!esVIP) {
       questions = questions.map(q => {
-        const { solution, ...rest } = q; // Borramos el campo solution
+        const { solution, ...rest } = q;
         return rest;
       });
     }
@@ -117,10 +118,10 @@ app.get("/api/:subject/file", checkUserPlan, async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.send("Servidor de TodoPAU operativo y listo.");
+  res.send("Servidor de TodoPAU operativo.");
 });
 
-// Ruta Admin corregida
+// Ruta Admin
 app.post("/api/admin/set-plan", async (req, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).send("No autorizado");
@@ -128,19 +129,17 @@ app.post("/api/admin/set-plan", async (req, res) => {
   const token = authHeader.split('Bearer ')[1];
   try {
     const decodedToken = await admin.auth().verifyIdToken(token);
-    
     if (decodedToken.email !== 'profeabatista@gmail.com') {
-      return res.status(403).send("No tienes permisos de administrador");
+      return res.status(403).send("Permisos denegados");
     }
 
     const { email, plan } = req.body;
     const user = await admin.auth().getUserByEmail(email);
     await admin.auth().setCustomUserClaims(user.uid, { plan: plan });
-    
-    res.json({ message: `Plan ${plan} asignado a ${email}` });
+    res.json({ message: `Plan ${plan} asignado.` });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.listen(PORT, () => console.log(`Servidor operativo en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
