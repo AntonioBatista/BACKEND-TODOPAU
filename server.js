@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import admin from "firebase-admin"; // Necesario para verificar tokens
+import admin from "firebase-admin";
 
 const app = express();
 app.use(cors());
@@ -15,7 +15,6 @@ const GITHUB_REPO = process.env.GITHUB_REPO;
 const GITHUB_BRANCH = process.env.GITHUB_BRANCH || "main";
 
 // --- CONFIGURACIÓN FIREBASE ADMIN ---
-// Debes pegar el JSON de tu cuenta de servicio en una variable de entorno llamada FIREBASE_SERVICE_ACCOUNT
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   admin.initializeApp({
@@ -23,18 +22,18 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   });
 }
 
-// Middleware para identificar el plan del usuario
+// Middleware corregido para identificar plan y email
 async function checkUserPlan(req, res, next) {
   const authHeader = req.headers.authorization;
-  req.userPlan = 'basico'; // Plan por defecto si no hay login
+  req.userPlan = 'basico';
+  req.userEmail = null; // Inicializamos el email
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const idToken = authHeader.split('Bearer ')[1];
     try {
       const decodedToken = await admin.auth().verifyIdToken(idToken);
-      // Aquí buscamos el plan en los Custom Claims o en una DB
-      // Por ahora, asumimos que si está logueado es al menos 'estudiante'
-      req.userPlan = decodedToken.plan || 'estudiante'; 
+      req.userPlan = decodedToken.plan || 'estudiante';
+      req.userEmail = decodedToken.email; // Guardamos el email para validaciones
     } catch (error) {
       console.error("Error verificando token:", error);
     }
@@ -57,13 +56,12 @@ async function fetchGithubJson(path) {
   return JSON.parse(Buffer.from(data.content, "base64").toString("utf8"));
 }
 
-// 1. Obtener Índice (Filtrado por materias según plan)
+// 1. Obtener Índice
 app.get("/api/:subject/index", checkUserPlan, async (req, res) => {
   try {
     const { subject } = req.params;
     const plan = req.userPlan;
 
-    // Restricción: Básico solo accede a Química
     if (plan === 'basico' && subject !== 'quimica') {
       return res.status(403).json({ error: "Plan Estudiante requerido para esta materia" });
     }
@@ -84,27 +82,30 @@ app.get("/api/:subject/index", checkUserPlan, async (req, res) => {
   }
 });
 
-// 2. Obtener Preguntas (Filtrado por años y ocultación de soluciones)
+// 2. Obtener Preguntas (Lógica de soluciones corregida)
 app.get("/api/:subject/file", checkUserPlan, async (req, res) => {
   try {
     const { subject } = req.params;
     const file = req.query.name;
     const plan = req.userPlan;
+    const email = req.userEmail;
 
     const folders = { quimica: "QUIM", matii: "MATII", fisica: "FIS", macsii: "MACSII", tinii: "TINII", dtecii: "DTECII" };
     let questions = await fetchGithubJson(`${folders[subject]}/${file}`);
 
-    // LÓGICA DE NIVELES
-    
-    // Nivel Básico y Estudiante: Solo ven últimos 3 años (2023-2025)
+    // --- FILTRADO POR AÑOS ---
     if (plan === 'basico' || plan === 'estudiante') {
       questions = questions.filter(q => q.exam_year >= 2023);
     }
 
-    // Nivel Básico y Estudiante: NO ven soluciones (borramos el campo)
-    if (plan === 'basico' || plan === 'estudiante') {
+    // --- LÓGICA DE SOLUCIONES (EL FILTRO CORRECTO) ---
+    // Solo permitimos ver soluciones si:
+    // Es el admin (tú) O tiene plan 'pro' O tiene plan 'docente'
+    const tienePermiso = (email === 'profeabatista@gmail.com' || plan === 'pro' || plan === 'docente');
+
+    if (!tienePermiso) {
       questions = questions.map(q => {
-        const { solution, ...rest } = q;
+        const { solution, ...rest } = q; // Borramos el campo solution
         return rest;
       });
     }
@@ -118,9 +119,8 @@ app.get("/api/:subject/file", checkUserPlan, async (req, res) => {
 app.get("/", (req, res) => {
   res.send("Servidor de TodoPAU operativo y listo.");
 });
-app.listen(PORT, () => console.log(`Servidor operativo en puerto ${PORT}`));
 
-// Ruta para que el administrador cambie planes
+// Ruta Admin corregida
 app.post("/api/admin/set-plan", async (req, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).send("No autorizado");
@@ -129,15 +129,12 @@ app.post("/api/admin/set-plan", async (req, res) => {
   try {
     const decodedToken = await admin.auth().verifyIdToken(token);
     
-    // SEGURIDAD: Solo tu email puede usar esta ruta
-    if (decodedToken.email !== 'TU_EMAIL_DE_ADMIN@gmail.com') {
+    if (decodedToken.email !== 'profeabatista@gmail.com') {
       return res.status(403).send("No tienes permisos de administrador");
     }
 
     const { email, plan } = req.body;
     const user = await admin.auth().getUserByEmail(email);
-    
-    // Asignamos el plan como un Custom Claim
     await admin.auth().setCustomUserClaims(user.uid, { plan: plan });
     
     res.json({ message: `Plan ${plan} asignado a ${email}` });
@@ -145,3 +142,5 @@ app.post("/api/admin/set-plan", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+app.listen(PORT, () => console.log(`Servidor operativo en puerto ${PORT}`));
