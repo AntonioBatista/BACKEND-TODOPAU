@@ -115,6 +115,9 @@ app.get("/api/:subject/file", checkUserPlan, async (req, res) => {
   }
 });
 
+app.get("/", (req, res) => {
+  res.send("Servidor de TodoPAU operativo y listo.");
+});
 app.listen(PORT, () => console.log(`Servidor operativo en puerto ${PORT}`));
 
 // Ruta para que el administrador cambie planes
